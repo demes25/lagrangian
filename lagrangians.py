@@ -7,6 +7,18 @@ from functionals import *
 from algebra import Norm, dVol
 from geometry import Minkowski
 
+# Here, we will define Lagrangian generators
+# These will be nested functionals that look like so:
+#
+# a Lagrangian generator K takes in some hyperparameters (*args), as well as a pair of metrics (g, g^-1)
+# and returns a Lagrangian:
+#       K : (*args, metrics) -> L
+# 
+# Wherefrom the Lagrangian is a functional which takes in a field/function A, and returns a function
+# on batched points [B, ...] that gives the values of the lagrangians of the field A at the given points
+#       L : A -> l
+#       l : [B, ...] -> [B]
+
 
 # --- REGULAR LAGRANGIAN GENERATOR --- #
 

@@ -29,14 +29,14 @@ def InnerProduct(U, V, g=None):
     if rank == 1:
         # for vectors: we want einstein summation
         def _bilinear(u, a, v):
-            # we write einstein summation, where b is the batch index and i/j are dummy
+            # we write einstein summation, where b is the batch index and ij are dummy
             return tf.einsum('bi,bij,bj->b', u, a, v)
         
     elif rank == 2:
         # for tensors: we want einstein summation through all indices
         def _bilinear(u, a, v):
-            # we write einstein summation, where b is the batch index and i/j are dummy
-            return tf.einsum('bIJ,bIi, bJj,bij->b', u, a, a, v)
+            # we write einstein summation, where b is the batch index and IJ/ij are dummy
+            return tf.einsum('bIJ,bIi,bJj,bij->b', u, a, a, v)
     
     else:
         #TODO: generalize to rank n
@@ -53,6 +53,8 @@ def Norm(U, g=None):
 def dVol(g):  
     abs_detg = apply_fn(tf.abs, det(g))
     return apply_fn(tf.sqrt, abs_detg)
+
+
 
 
 # some generic tensors:
