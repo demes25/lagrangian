@@ -6,83 +6,139 @@
 from functionals import *
 from algebra import Delta, Eta
 
-# define some spacetimes
+# define some geometries
 
-# dimensionality
-S = 3 # spatial dim
-N = S + 1 # spatiotemporal dim
-
-# each batched spatial tensor will be assumed to look like [B, S, ...]
-# each batched spacetime tensor will be assumed to look like [B, N, ...]
+# each batched tensor will be assumed to look like [B, N, ...]
+# where N is the possible amount of components in a given geometry.
 
 # metrics should be tensor-to-tensor functions,
 # which take in a batched rank 1 tensors (coordinates) and return batched rank-2 tensors
 
-# spacetimes (or spaces) should be functionals which take in some parameter (if needed)
+# geometries should be functionals which take in some parameter (if needed)
 # and return a tuple -- (metric, inverse metric) -- of metric functions
-# (note that this does not coincide exactly with what a spacetime actually is - our functionals will also assume a fixed coordinate map)
+# (note that this does not coincide exactly with what a geometry actually is - our functionals will also assume a fixed coordinate map)
 
-# --- SPACES --- # 
 
-# takes in None
-# returns 2-tuple of constant functions fn : [B, S] 
-def EuclideanSpace():
-    # x must be [B, S]
+# --- GEOMETRIES // SPACES --- #
+
+# takes in dimensionality N
+# returns 2-tuple of constant functions fn : [B, N] -> B ** delta
+#
+# defined for any N
+def Euclidean(
+    N # dimensionality
+):
+    _delta = Delta(N)
+
+    # x must be [B, N]
     def _m(x):
-        return Delta(S)
+        return _delta
+
+    return (_m, _m)
+
+# takes in scalar
+# returns a tuple of fn : [B, N] -> [B, N, N]
+#
+# defined for N = 2 (polar) and N = 3 (standard spherical)
+def Spherical(
+    N # dimensionality
+): 
     
-def SphericalSpace():
-    # X must be [B, S]
-    def _metric(X):
-        # [r, theta, phi]
-        R = X[:, 0]
-        Theta = X[:, 1]
+    if N == 2:
+        # we define polar coordinates
 
-        # TODO: maybe extend to arbitrary dimensions in spherical spatial coordinates?
-        # right now just for N=4  
-        rsq = R * R
-        sinth = tf.sin(Theta)
+        # X must be [B, N]
+        def _metric(X):
+            # [r, theta]
+            R = X[:, 0]
 
-        diag_elements = tf.stack([one, rsq, rsq * sinth * sinth], axis=-1)
-
-        return tf.linalg.diag(diag_elements)
-
-    
-    # X must be [B, N]
-    def _inv_metric(X):
-        # [r, theta, phi]
-        R = X[:, 0]
-        Theta = X[:, 1]
-
-        # TODO: maybe extend to arbitrary dimensions in spherical spatial coordinates?
-        # right now just for N=4  
-        rsq = R * R
-        sinth = tf.sin(Theta)
-
-        diag_elements = tf.stack([one, one/rsq, one/(rsq * sinth * sinth)], axis=-1)
-
-        return tf.linalg.diag(diag_elements)
+            ones = tf.ones_like(R, dtype=DTYPE)
+            rsq = R * R
+            diag_elements = tf.stack([ones, rsq], axis=-1)
+            return tf.linalg.diag(diag_elements)
         
+        # X must be [B, N]
+        def _inv_metric(X):
+            # [r, theta]
+            R = X[:, 0]
+            
+            ones = tf.ones_like(R, dtype=DTYPE)
+            rsq = R * R
+            diag_elements = tf.stack([ones, ones/rsq], axis=-1)
+            return tf.linalg.diag(diag_elements)
+    
+    elif N == 3:
+        # we construct spherical coordinates
+
+        # X must be [B, N]
+        def _metric(X):
+            # [r, theta, phi]
+            R = X[:, 0]
+            Theta = X[:, 1]
+
+            # TODO: maybe extend to arbitrary dimensions in spherical spatial coordinates?
+            # right now just for N=4
+            ones = tf.ones_like(R, dtype=DTYPE)
+            rsq = R * R
+            sinth = tf.sin(Theta)
+            diag_elements = tf.stack([ones, rsq, rsq * sinth * sinth], axis=-1)
+
+            return tf.linalg.diag(diag_elements)
+
+        
+        def _inv_metric(X):
+            # [r, theta, phi]
+            R = X[:, 0]
+            Theta = X[:, 1]
+
+            # TODO: maybe extend to arbitrary dimensions in spherical spatial coordinates?
+            # right now just for N=4
+            ones = tf.ones_like(R, dtype=DTYPE)
+            rsq = R * R
+            sinth = tf.sin(Theta)
+            diag_elements = tf.stack([ones, ones/rsq, ones/(rsq * sinth * sinth)], axis=-1)
+
+            return tf.linalg.diag(diag_elements)
+
+    else:
+        #TODO: generalize spherical-like metrics
+        raise NotImplemented("Spherical metric only implemented for dimensions 2 and 3")
+
     return (_metric, _inv_metric)
+    
+
+
 
 # --- SPACETIMES --- #
 
 # takes in None
 # returns 2-tuple of constant functions fn : [B, N] -> B ** eta
-def MinkowskiSpacetime():
+#
+# defined for any N
+def Minkowski(
+    N = 4 # dimensionality
+):  
+    _eta = Eta(N)
+
     # X must be [B, N]
     def _m(X):
         B = tf.shape(X)[0]
-        return tf.tile(Eta, (B, N, N))
+        return tf.tile(_eta, (B, N, N))
     
     return (_m, _m)
 
 # takes in scalar
 # returns a tuple of fn : [B, N] -> [B, N, N]
-# (g, g^-1)
-def SchwarzschildSpacetime(
-    M # black hole mass
+#
+# defined for N = 4 only
+def Schwarzschild(
+    M, # black hole mass
+    N = 4 # dimensionality
 ):
+    #TODO: generalize Schwarzschild-like metrics
+    if N != 4:
+        raise NotImplemented("Schwarzschild metric only implemented for dimension 4")
+
     schw_radius = tf.constant(2 * M, dtype=DTYPE) * G/(c*c)
 
     # X must be [B, N]
@@ -93,11 +149,13 @@ def SchwarzschildSpacetime(
 
         # TODO: maybe extend to arbitrary dimensions in spherical spatial coordinates?
         # right now just for N=4
-        U = one - schw_radius/R #  
+        ones = tf.ones_like(R, dtype=DTYPE)
+
+        U = ones - schw_radius/R #  
         rsq = R * R
         sinth = tf.sin(Theta)
 
-        diag_elements = tf.stack([-U, one/U, rsq, rsq * sinth * sinth], axis=-1)
+        diag_elements = tf.stack([-U, ones/U, rsq, rsq * sinth * sinth], axis=-1)
 
         return tf.linalg.diag(diag_elements)
 
@@ -110,11 +168,13 @@ def SchwarzschildSpacetime(
 
         # TODO: maybe extend to arbitrary dimensions in spherical spatial coordinates?
         # right now just for N=4
-        U = one - schw_radius/R #  
+        ones = tf.ones_like(R, dtype=DTYPE)
+
+        U = ones - schw_radius/R #  
         rsq = R * R
         sinth = tf.sin(Theta)
 
-        diag_elements = tf.stack([-one/U, U, one/rsq, one/(rsq * sinth * sinth)], axis=-1)
+        diag_elements = tf.stack([-ones/U, U, ones/rsq, ones/(rsq * sinth * sinth)], axis=-1)
 
         return tf.linalg.diag(diag_elements)
         

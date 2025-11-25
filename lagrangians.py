@@ -5,27 +5,31 @@
 
 from functionals import *
 from algebra import Norm, dVol
-from geometry import MikowskiSpacetime
+from geometry import Minkowski
 
 
-# --- REGULAR LAGRANGIANS --- #
+# --- REGULAR LAGRANGIAN GENERATOR --- #
 
 # these will be functionals that take in hyperparameters
 # and return functionals that take in a coordinate point
 # and return the lagrangian at the given point value
 
 def FreeParticle(
-    m = one
-    #metrics = TODO: generalize this to any spatial metric
-):
+    m, # mass of the free particle
+    metrics # geometry of our space
+):  
+    g, _ = metrics
+
     def _s(x):
-        kinetic_term = Norm(grad(x))
-        return scale_fn(half, kinetic_term)
+        # X should be [B, N, 1] since X is directly position, 
+        # and we want to find the kinetic term by mul.
+        kinetic_term = Norm(diff(x), g)
+        return scale_fn(half * m, kinetic_term)
     
     return _s 
 
 
-# --- FIELD LAGRANGIAN DENSITIES --- #
+# --- FIELD LAGRANGIAN DENSITY GENERATORS --- #
 
 # these will be functionals that take in hyperparameters
 # and return functionals that take in a field and return the lagrangian density at the given field value
@@ -35,7 +39,7 @@ def FreeParticle(
 # scalar field phi
 def FreeScalarField(
     m = zero, # mass of the scalar field
-    metrics = MikowskiSpacetime() # metrics should be a tuple of tensor functions (g, g_inv)
+    metrics = Minkowski(N=4) # metrics should be a tuple of tensor functions (g, g_inv)
 ):
     g, g_inv = metrics
     vol_form = dVol(g)
@@ -59,7 +63,7 @@ def FreeScalarField(
 
 # free maxwell field A_mu
 def FreeMaxwellField(
-    metrics = MikowskiSpacetime() # metrics should be a tuple of tensor functions (g, g_inv)
+    metrics = Minkowski(N=4) # metrics should be a tuple of tensor functions (g, g_inv)
 ):
     g, g_inv = metrics
     vol_form = dVol(g)
@@ -74,7 +78,7 @@ def FreeMaxwellField(
 
         kinetic_term = Norm(F, g_inv)
 
-        return mul_fn(vol_form, scale_fn(half, kinetic_term))
+        return mul_fn(vol_form, scale_fn(-quarter, kinetic_term))
 
     return _s
         

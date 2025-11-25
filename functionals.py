@@ -61,8 +61,21 @@ def div_fn(f, g):
 
 # we define some operators as well
 
+# F a rank n tensor function of a scalar input
+# returns F' a rank n tensor (single-variable differentiation)
+def diff(F):
+    def dF(x):
+        with tf.GradientTape() as tape:
+            # we watch our inputs
+            tape.watch(x)
+
+            # returns rank n+1 tensor F', where F'[..., mu] = partial_mu F  
+            f = F(x)
+        return tape.gradient(f, x)
+    return dF
+
 # F a rank n tensor function
-# returns F' a rank n+1 tensor
+# returns F' a rank n+1 tensor (multi-variable differentiation)
 def grad(F):
     def dF(x):
         with tf.GradientTape(persistent=True) as tape:
@@ -74,6 +87,7 @@ def grad(F):
         return tape.batch_jacobian(f, x)
     
     return dF
+
 
 # G a rank 2 tensor function
 #
