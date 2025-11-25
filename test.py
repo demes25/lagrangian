@@ -1,4 +1,4 @@
-from operators import *
+from functionals import *
 
 def sq(v):
     return v*v

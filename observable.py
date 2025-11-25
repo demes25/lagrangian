@@ -9,19 +9,20 @@
 
 import tensorflow as tf
 from keras import models, layers, utils
-from geometry import N, DTYPE
+from context import DTYPE
 
 # wraps a simple Sequential model
 # 
 # we apply a neural network to some discretization of our desired domain, essentially
 # finite element method, pass everything through a dense, and train on minimizing the total action.
 #
-# we make these spacetime fields - each point in the domain has four coordinates.
+# these will be either spacetime fields - each point in the domain has four coordinates.
+# or spatial observables - like position - each point in the domain has one coordinate.
 @utils.register_keras_serializable
-class Field(models.Model):
+class Observable(models.Model):
     
     def __init__(self, 
-                 rank = 0, # by default a scalar field
+                 shape = [], # by default a scalar field
                  hidden_dims = 64, # the hidden dimension of our mlp layers 
                  activation = 'gelu', # activation - i will put gelu for balance between universal differentiability and neuron expressivity - sigmoids suppress large numbers
                  dtype = DTYPE # we choose dtype, if wanted
@@ -30,15 +31,15 @@ class Field(models.Model):
 
         # for serializability
         self.internal_config = {
-            'rank' : rank,
+            'shape' : shape,
             'hidden_dims' : hidden_dims,
             'activation' : activation,
             'dtype' : dtype
         }
 
-        self.rank = rank 
-        self.output_shape = [] if rank == 0 else rank * [N]
+        self.shape = shape
         self._dtype = dtype 
+        flat_shape = tf.reduce_sum(shape, axis=0) # output shape flattened for Dense calculation
 
         # we will make a three-layer mlp
         self.fxn = models.Sequential(
@@ -46,7 +47,7 @@ class Field(models.Model):
                 layers.Dense(hidden_dims, activation=activation, dtype=dtype), 
                 layers.Dense(hidden_dims, activation=activation, dtype=dtype),
                 layers.Dense(hidden_dims, activation=activation, dtype=dtype), # note that gelu suppresses negative numbers
-                layers.Dense(rank * N, dtype=dtype) # so we put no activation for last layer, we want to be able to have negative numbers
+                layers.Dense(flat_shape, dtype=dtype) # so we put no activation for last layer, we want to be able to have negative numbers
             ]
         )
 
@@ -65,11 +66,11 @@ class Field(models.Model):
         super().build(input_shape)
 
 
-    # input : domain [N, 4] - a set of N discrete 4-coordinate events in spacetime
-    # output : [N, rank * [4]] - a set of N tensors corresponding to the field values at each given point 
+    # input : domain [B, n] - a set of B discrete n-coordinate events in spacetime
+    # output : [B, S] - a set of B tensors corresponding to the field values at each given point 
     def call(self, domain):
         result = self.fxn(domain)
-        result = tf.reshape(result, self.output_shape)
+        result = tf.reshape(result, self.shape)
         return result 
         
     
