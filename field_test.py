@@ -5,7 +5,7 @@
 
 from observable import Observable
 from system import System, discretize
-from lagrangians import FreeScalarField
+from __variations import FreeScalarField
 from keras.models import save_model, load_model
 from keras.optimizers import AdamW
 from geometry import Minkowski
@@ -15,7 +15,7 @@ from functionals import *
 # starting points.
 
 # we let our wave amplitude be an observable 
-phi = Observable(hidden_dims=64, activation='sin')
+phi = Observable(hidden_dims=32, activation='tanh')
 
 # spring oscillation is repetitive in time - say we allow to train over 20 meters
 step = 0.01

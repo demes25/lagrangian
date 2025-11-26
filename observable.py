@@ -55,7 +55,7 @@ class Observable(models.Model):
         # we will make a three-layer mlp
         self.fxn = models.Sequential(
             layers= [
-                layers.Dense(hidden_dims, activation=activation, dtype=dtype), 
+                layers.Dense(hidden_dims, activation=activation, dtype=dtype),
                 layers.Dense(hidden_dims, activation=activation, dtype=dtype),
                 layers.Dense(hidden_dims, activation=activation, dtype=dtype), # note that gelu suppresses negative numbers
                 layers.Dense(flat_shape, dtype=dtype) # so we put no activation for last layer, we want to be able to have negative numbers

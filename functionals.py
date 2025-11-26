@@ -62,6 +62,14 @@ def div_fn(f : Function, g : Function) -> Function:
     return _h
 
 
+# einstein summation functional
+def einsum_fn(instructions : str, *fnargs : Function):
+    def _h(x : tf.Tensor) -> tf.Tensor:
+        eval_fnargs = [f(x) for f in fnargs]
+        return tf.einsum(instructions, *eval_fnargs)
+    return _h 
+    
+
 # we define some operators as well
 
 # F a rank n tensor function of a scalar input
@@ -94,6 +102,35 @@ def grad(F : Function) -> Function:
         return tape.gradient(f, x)
     
     return _h
+
+# A a vector function, g_inv the inverse metric, vol_form the volume form
+# returns sqrt(g) divA, a scalar function
+def div(A : Function, g_inv : Function, vol_form : Function) -> Function:
+
+    def _h(x):
+        with tf.GradientTape(persistent=True) as tape:
+            # we watch our inputs
+            tape.watch(x)
+
+            vf = vol_form(x)
+            gi = g_inv(x)
+
+            f = A(x)
+
+            # first we raise f
+            f = tf.einsum('bij,bj->bi', gi, f)
+
+            # then multiply by the volume form
+            f = tf.expand_dims(vf, axis=1) * f 
+        
+        # this is now [B, N, N]
+        J = tape.batch_jacobian(f, x)
+
+        # trace over the indices
+        return tf.einsum('bii->b', J)
+    
+    return _h
+
 
 
 # G a rank 2 tensor function

@@ -132,7 +132,7 @@ class System:
         # then we take norms (Norm remains squared, recall)
         per_point_sq_penalty = Norm(dif, self.inv_metric) 
         per_point_penalty = apply_fn(tf.sqrt, per_point_sq_penalty)
-        
+
         # and average over all points
         return apply_fn(tf.reduce_mean, per_point_penalty, axis=0)
 
