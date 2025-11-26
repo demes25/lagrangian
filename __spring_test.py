@@ -5,7 +5,7 @@
 
 from observable import Observable
 from system import System, discretize
-from variations import SpringParticle
+from lagrangians import SpringParticle
 from keras.models import save_model, load_model
 from keras.optimizers import AdamW
 from geometry import Euclidean

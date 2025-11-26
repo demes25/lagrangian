@@ -10,7 +10,7 @@ from keras.utils import Progbar
 
 from functionals import *
 from geometry import Geometry
-from variations import Functional, FunctionalGenerator
+from lagrangians import Functional, FunctionalGenerator
 from algebra import Norm
 
 # here we look at general systems and how to deal with them:
@@ -130,8 +130,9 @@ class System:
         dif = sub_fn(U, self.boundary_function)
         
         # then we take norms (Norm remains squared, recall)
-        per_point_penalty = Norm(dif, self.inv_metric) 
-
+        per_point_sq_penalty = Norm(dif, self.inv_metric) 
+        per_point_penalty = apply_fn(tf.sqrt, per_point_sq_penalty)
+        
         # and average over all points
         return apply_fn(tf.reduce_mean, per_point_penalty, axis=0)
 
