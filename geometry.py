@@ -5,6 +5,7 @@
 
 from functionals import *
 from algebra import Delta, Eta
+from typing import Tuple
 
 # define some geometries
 
@@ -18,6 +19,9 @@ from algebra import Delta, Eta
 # and return a tuple -- (metric, inverse metric) -- of metric functions
 # (note that this does not coincide exactly with what a geometry actually is - our functionals will also assume a fixed coordinate map)
 
+# this is a type which represents our geometry
+# -- i.e. a pair of functions denoting (g, g^-1) 
+Geometry = Tuple[Function, Function] 
 
 # --- GEOMETRIES // SPACES --- #
 
@@ -27,18 +31,20 @@ from algebra import Delta, Eta
 # defined for any N
 def Euclidean(
     N # dimensionality
-):
+) -> Geometry:
+    
     _delta = Delta(N)
 
     # we expand dimensions for tiling purposes
     _delta = tf.expand_dims(_delta, axis=0)
 
-    # x must be [B, N]
-    def _m(X):
+    # X must be [B, N]
+    # gives metric/inverse value(s) at X
+    def _metric(X : tf.Tensor) -> tf.Tensor:
         B = tf.shape(X)[0]
         return tf.tile(_delta, (B, 1, 1))
 
-    return (_m, _m)
+    return (_metric, _metric)
 
 # takes in scalar
 # returns a tuple of fn : [B, N] -> [B, N, N]
@@ -46,13 +52,14 @@ def Euclidean(
 # defined for N = 2 (polar) and N = 3 (standard spherical)
 def Spherical(
     N # dimensionality
-): 
+) -> Geometry: 
     
     if N == 2:
         # we define polar coordinates
 
         # X must be [B, N]
-        def _metric(X):
+        # gives metric value(s) at X
+        def _metric(X : tf.Tensor) -> tf.Tensor:
             # [r, theta]
             R = X[:, 0]
 
@@ -62,7 +69,8 @@ def Spherical(
             return tf.linalg.diag(diag_elements)
         
         # X must be [B, N]
-        def _inv_metric(X):
+        # gives inverse metric value(s) at X
+        def _inverse_metric(X : tf.Tensor) -> tf.Tensor:
             # [r, theta]
             R = X[:, 0]
             
@@ -75,7 +83,8 @@ def Spherical(
         # we construct spherical coordinates
 
         # X must be [B, N]
-        def _metric(X):
+        # gives metric value(s) at X
+        def _metric(X : tf.Tensor) -> tf.Tensor:
             # [r, theta, phi]
             R = X[:, 0]
             Theta = X[:, 1]
@@ -89,8 +98,9 @@ def Spherical(
 
             return tf.linalg.diag(diag_elements)
 
-        
-        def _inv_metric(X):
+        # X must be [B, N]
+        # gives inverse metric value(s) at X
+        def _inverse_metric(X : tf.Tensor) -> tf.Tensor:
             # [r, theta, phi]
             R = X[:, 0]
             Theta = X[:, 1]
@@ -108,7 +118,7 @@ def Spherical(
         #TODO: generalize spherical-like metrics
         raise NotImplemented("Spherical metric only implemented for dimensions 2 and 3")
 
-    return (_metric, _inv_metric)
+    return (_metric, _inverse_metric)
     
 
 
@@ -121,18 +131,20 @@ def Spherical(
 # defined for any N
 def Minkowski(
     N = 4 # dimensionality
-):  
+) -> Geometry:
+      
     _eta = Eta(N)
 
     # we expand dimensions for tiling purposes
     _eta = tf.expand_dims(_eta, axis=0)
 
     # X must be [B, N]
-    def _m(X):
+    # gives metric/inverse value(s) at X
+    def _metric(X : tf.Tensor) -> tf.Tensor:
         B = tf.shape(X)[0]
         return tf.tile(_eta, (B, 1, 1))
     
-    return (_m, _m)
+    return (_metric, _metric)
 
 # takes in scalar
 # returns a tuple of fn : [B, N] -> [B, N, N]
@@ -141,7 +153,8 @@ def Minkowski(
 def Schwarzschild(
     M, # black hole mass
     N = 4 # dimensionality
-):
+) -> Geometry:
+    
     #TODO: generalize Schwarzschild-like metrics
     if N != 4:
         raise NotImplemented("Schwarzschild metric only implemented for dimension 4")
@@ -149,7 +162,8 @@ def Schwarzschild(
     schw_radius = tf.constant(2 * M, dtype=DTYPE) * G/(c*c)
 
     # X must be [B, N]
-    def _metric(X):
+    # gives metric value(s) at X
+    def _metric(X : tf.Tensor) -> tf.Tensor:
         # [t, r, theta, phi]
         R = X[:, 1]
         Theta = X[:, 2]
@@ -168,7 +182,8 @@ def Schwarzschild(
 
     
     # X must be [B, N]
-    def _inv_metric(X):
+    # gives inverse metric value(s) at X
+    def _inverse_metric(X : tf.Tensor) -> tf.Tensor:
         # [t, r, theta, phi]
         R = X[:, 1]
         Theta = X[:, 2]
@@ -185,5 +200,5 @@ def Schwarzschild(
 
         return tf.linalg.diag(diag_elements)
         
-    return (_metric, _inv_metric)
+    return (_metric, _inverse_metric)
 

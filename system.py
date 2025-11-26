@@ -9,16 +9,17 @@ from keras.models import Model
 from keras.utils import Progbar
 
 from functionals import *
+from geometry import Geometry
+from variations import Functional, FunctionalGenerator
 from algebra import Norm
-from typing import Callable
 
 # here we look at general systems and how to deal with them:
 # discretizing the domain, passing through neural networks, 
-# applying lagrangians and boundary conditions
+# applying variations and boundary conditions
 
 # we discretize.
 #
-# the input is X [N, 2] (the ranges) and dX [N] (the step sizes)
+# the input is X [2, N] (the ranges) and dX [N] (the step sizes)
 #
 # where N is the dimension count, the first col tells us starting points and 
 # second col tells us ending points.
@@ -33,13 +34,16 @@ from typing import Callable
 #
 # we use meshgrid to produce a cartesian product of linspaces
 # as such I will make the indexing adjustable depending on how we want it
-def discretize(X, dX, indexing='xy'): 
+def discretize(X : tf.Tensor, dX : tf.Tensor, indexing='ij') -> tf.Tensor: 
 
     grid_slices = []
 
-    for i in range(tf.shape(X)[0]):
-        start = X[i, 0]
-        end = X[i, 1]
+    starts = X[0]
+    ends = X[1]
+
+    for i in range(tf.shape(starts)[0]):
+        start = starts[i]
+        end = ends[i]
         spacing = dX[i]
         
         # TODO: this can be made more general to take 'spacing' as literal distance
@@ -58,31 +62,42 @@ def discretize(X, dX, indexing='xy'):
     return tf.stack(grid, axis=-1)
 
 
+# a helper function to form convex combinations with a Bernoulli parameter p
+# note this is diff'able in A and B, not in p.
+def convex_combo(A : tf.Tensor, B : tf.Tensor, p : tf.Tensor) -> tf.Tensor:
+    if p == zero:
+        return A
+    elif p == one:
+        return B
+    else:
+        return (one - p) * A + p * B 
+
 
 class System:
     def __init__(
         self,
         parameter_num, # how many parameters do we have? (4 for fields, 1 (time) for regular)
 
-        metrics,  # (g, g^-1)
-        # the metrics for our underlying geometry. we will use this to generate the lagrangian
+        geometry : Geometry,  # (g, g^-1)
+        # the metrics for our underlying geometry. we will use this to generate the variation
         # and calculate the boundary penalty
         # defaults to euclidean if None
     
-        boundary_function, # function that gives us the desired boundary values
+        # TODO: mak
+        boundary_function : Function, # function that gives us the desired boundary values
 
-        lagrangian_generator, 
-        # a lagrangian generator from the 'lagrangians' module.
+        variation_generator : FunctionalGenerator, 
+        # a variation generator from the 'variations' module.
         # note that this thing is a function that takes in a field/soltuion A
         # and returns a function L[A] which acts on coordinates
 
-        *lagrangian_args, # args for the lagrangian generator
-        **lagrangian_kwargs, # kwargs for the lagrangian generator
+        *variation_args, # args for the variation generator
+        **variation_kwargs, # kwargs for the variation generator
     ):
         self.parameter_num = parameter_num
-        self.lagrangian = lagrangian_generator(*lagrangian_args, **lagrangian_kwargs, metrics=metrics)
+        self.variation = variation_generator(*variation_args, **variation_kwargs, geometry=geometry)
         self.boundary_function = boundary_function
-        self.metric, self.inv_metric = metrics
+        self.metric, self.inv_metric = geometry
 
     # I will assume that all proposed solutions are either scalar
     # or covariant, and therefore I will be taking norms using the inverse metric 
@@ -92,13 +107,16 @@ class System:
     # we calculate the action for some 
     # proposed solution U
     #
-    # this returns a function S : [B, N] -> []
+    # this returns a function dS : [B, N] -> []
     # which takes in a discretized domain and returns the action of U over that domain
     #
-    # note that, since all of our lagrangian generators already include the volume form,
-    # we are free to simply sum without worrying about weighting.
-    def action(self, U):
-        return apply_fn(tf.reduce_mean, self.lagrangian(U), axis=0)
+    # note that all of our variation generators already include the volume form
+    #
+    # this is really the total action variation over the domain
+    def action(self, U : Function):
+        a = apply_fn(tf.reduce_sum, self.variation(U), axis=0)
+
+        return a
     
 
     # we calculate the boundary penalty for some
@@ -107,7 +125,7 @@ class System:
     # this returns a function P : [B, N] -> []
     # which takes in a discretized boundary and returns the mean square difference between U and our
     # boundary function over the given points.
-    def boundary_penalty(self, U):
+    def boundary_penalty(self, U : Function):
         # we first take differences
         dif = sub_fn(U, self.boundary_function)
         
@@ -118,67 +136,50 @@ class System:
         return apply_fn(tf.reduce_mean, per_point_penalty, axis=0)
 
 
-    # this returns a loss functor for the proposed field U
-    # the idea is, we encapsulate everything like so:
-    # 
-    # this functor returns:
-    #   a function which takes in a domain, a boundary, and a
-    #   BOUNDARY WEIGHT (how much to focus on the boundary loss)
-    #   and returns the relevant convex combination of action and boundary loss 
-    def loss_functor(self, U):
-        action = self.action(U)
-        boundary_penalty = self.boundary_penalty(U)
-
-        def loss(domain, boundary, boundary_weight):
-            # assert 0 <= boundary_weight <= 1
-
-            if boundary_weight == zero:
-                return action(domain)
-            elif boundary_weight == one:
-                return boundary_penalty(boundary)
-            else:
-                return (1-boundary_weight) * action(domain) + boundary_weight * boundary_penalty(boundary)
-
-        return loss
-
-
     # we allow an arbitrary boundary weight function which returns some weight depending on which
     # epoch we are on. this allows us to focus on the boundary at different points through training
     def train(
         self, 
         U : Model, 
-        domain, # domain over which to train
-        boundary, # boundary over which to train
+        domain : tf.Tensor, # domain over which to train. should be a collection of B points [B, N]
+        boundary : tf.Tensor, # boundary over which to train, likewise a collection of b points [b, N]
         optimizer : Optimizer, 
         epochs = 10,
-        boundary_weight : Callable[[int], float] | float = 0.5 # boundary weight function
+        boundary_weight : Function | tf.Tensor = half # boundary weight function, should either be a scalar or return a scalar
     ):
         # we put a nice little progress bar for prettiness
-        bar = Progbar(epochs)
+        bar = Progbar(epochs, stateful_metrics=['action', 'boundary penalty'])
 
-        loss = self.loss_functor(U)
+        action = self.action(U)
+        boundary_penalty = self.boundary_penalty(U)
         
         # if boundary_weight is a constant - just go about as normal
         if not callable(boundary_weight): 
             for epoch in range(epochs):
                 with tf.GradientTape() as tape:
-                    loss_value = loss(domain, boundary, boundary_weight)
+                    A = action(domain)
+                    B = boundary_penalty(boundary)
+
+                    loss_value = convex_combo(tf.square(A), B, boundary_weight)
 
                 # apply gradients
                 gradients = tape.gradient(loss_value, U.trainable_variables)
                 optimizer.apply_gradients(zip(gradients, U.trainable_variables))  
 
-                bar.update(epoch + 1, values=[('loss', loss_value.numpy())]) 
+                bar.update(epoch + 1, values=[('action', A), ('boundary penalty', B), ('loss', loss_value.numpy())]) 
 
-        # otherwise we evaluate it per-epoch.
+        # otherwise we evaluate boundary_weight per-epoch.
         else:
             for epoch in range(epochs):
                 with tf.GradientTape() as tape:
-                    loss_value = loss(domain, boundary, boundary_weight(epoch)) 
+                    A = action(domain)
+                    B = boundary_penalty(boundary)
+                    loss_value = convex_combo(A, B, boundary_weight(epoch))
 
                 # apply gradients
                 gradients = tape.gradient(loss_value, U.trainable_variables)
                 optimizer.apply_gradients(zip(gradients, U.trainable_variables))  
 
-                bar.update(epoch + 1, values=[('loss', loss_value.numpy())]) 
+                bar.update(epoch + 1, values=[('action', A), ('boundary penalty', B), ('loss', loss_value.numpy())]) 
+
 
