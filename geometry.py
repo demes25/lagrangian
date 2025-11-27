@@ -3,8 +3,7 @@
 # Nov 2025
 # Spacetimes
 
-from functionals import *
-from algebra import Delta, Eta
+from composition import *
 from typing import Tuple
 
 # define some geometries
@@ -23,7 +22,20 @@ from typing import Tuple
 # -- i.e. a pair of functions denoting (g, g^-1) 
 Geometry = Tuple[Function, Function] 
 
-# --- GEOMETRIES // SPACES --- #
+
+# some generic tensors:
+
+# identity tensor
+def Delta(N) -> tf.Tensor:
+    return tf.linalg.diag(tf.ones([N], dtype=DTYPE))
+
+# minkowski tensor - signature (-, +, +, +, ...)
+def Eta(N) -> tf.Tensor:
+    return tf.linalg.diag(tf.constant([-1] + [1]*(N-1), dtype=DTYPE))
+
+
+
+# --- SPACES --- #
 
 # takes in dimensionality N
 # returns 2-tuple of constant functions fn : [B, N] -> B ** delta
@@ -201,4 +213,6 @@ def Schwarzschild(
         return tf.linalg.diag(diag_elements)
         
     return (_metric, _inverse_metric)
+
+
 

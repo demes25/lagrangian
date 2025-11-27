@@ -2,13 +2,14 @@
 # NN Field Theories
 # Nov 2025
 # Systems
+# TODO
 
 import tensorflow as tf
 from keras.optimizers import Optimizer
 from keras.models import Model
 from keras.utils import Progbar
 
-from functionals import *
+from composition import *
 from geometry import Geometry
 from lagrangians import Functional, FunctionalGenerator
 from algebra import Norm
@@ -16,51 +17,6 @@ from algebra import Norm
 # here we look at general systems and how to deal with them:
 # discretizing the domain, passing through neural networks, 
 # applying variations and boundary conditions
-
-# we discretize.
-#
-# the input is X [2, N] (the ranges) and dX [N] (the step sizes)
-#
-# where N is the dimension count, the first col tells us starting points and 
-# second col tells us ending points.
-#
-# dX tells us how far away points should be in each dimension.
-#
-# so this will give an [n**N, N] grid
-#
-# for now this splits our ranges linearly via tf.linspace
-# but this is slightly suspect for more nontrivial geometries, like spherical
-# still, though, should work not too bad.
-#
-# we use meshgrid to produce a cartesian product of linspaces
-# as such I will make the indexing adjustable depending on how we want it
-def discretize(X : tf.Tensor, dX : tf.Tensor, indexing='ij') -> tf.Tensor: 
-
-    grid_slices = []
-
-    starts = X[0]
-    ends = X[1]
-
-    for i in range(tf.shape(starts)[0]):
-        start = starts[i]
-        end = ends[i]
-        spacing = dX[i]
-        
-        # TODO: this can be made more general to take 'spacing' as literal distance
-        # and use the metric at a given point to find the next discrete point by this measure of distance
-        
-        n = (end - start)/spacing # we find the amount of points
-        n = tf.cast(n, tf.int32) # must be integer
-
-        new_slice = tf.linspace(start, end, n) # from x[0] to x[1], n discrete points
-
-        grid_slices.append(new_slice)
-    
-    grid = tf.meshgrid(*grid_slices, indexing=indexing)
-
-    # then we stack along the last axis
-    return tf.stack(grid, axis=-1)
-
 
 # a helper function to form convex combinations with a Bernoulli parameter p
 # note this is diff'able in A and B, not in p.
@@ -161,7 +117,7 @@ class System:
                     A = action(domain)
                     B = boundary_penalty(boundary)
 
-                    loss_value = convex_combo(tf.square(A), B, boundary_weight)
+                    loss_value = convex_combo(tf.abs(A), B, boundary_weight)
 
                 # apply gradients
                 gradients = tape.gradient(loss_value, U.trainable_variables)
