@@ -7,7 +7,7 @@ from operators import *
 from keras.optimizers import AdamW
 from geometry import Euclidean
 from system import System
-
+from plots import save_plot
 
 # we test our current abilities.
 # i'll try to find the derivative and second derivative of the square function
@@ -32,18 +32,9 @@ square_mesh = tf.squeeze(square_image.view())
 grad = Gradient(square_image)
 grad_mesh = tf.squeeze(grad.view())
 
-laplace = ScalarLaplacian(square_image)
+laplace = FlatLaplacian(square_image)
 laplace_mesh = tf.squeeze(laplace.view())
 
 result = tf.stack([square_mesh, grad_mesh, laplace_mesh], axis=1)
 
-# i will make a plot here as well:
-import tfplot
-
-@tfplot.autowrap(figsize=(20, 11))
-def plot(x, y, fig=None, ax=None):
-    ax.plot(x, y)
-    return fig
-
-pl = plot(base_mesh, result)
-tf.io.write_file("square_plot.png", tf.io.encode_png(pl))
+save_plot(base_mesh, result, 'square_plot.png')

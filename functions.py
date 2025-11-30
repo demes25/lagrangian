@@ -39,6 +39,7 @@ def norm_sq_fn(metric : tf.Tensor | None = None) -> Function:
 
 # mu must be [N]
 # var must be scalar
+# returns the gaussian function F(x) =  exp[-(x-mu)^2/2var]/sqrt(2pi var)
 def gaussian_fn(mu : tf.Tensor, var : tf.Tensor) -> Function:
     var2 = two * var
     factor = tf.sqrt(pi * var2)
@@ -55,6 +56,23 @@ def gaussian_fn(mu : tf.Tensor, var : tf.Tensor) -> Function:
         return tf.exp(-k)/factor
 
     return _h 
+
+
+# center must be [N]
+# returns the reciprocal function F(x) = 1/sqrt(x^2)
+def reciprocal_fn(center : tf.Tensor, epsilon = 1e-7) -> Function:
+
+    center = tf.expand_dims(center, axis=0)
+
+    # x must be [B, N]
+    def _h(x : tf.Tensor) -> tf.Tensor:
+        ksq = tf.reduce_sum(tf.square(x - center), axis=-1)
+        k = tf.sqrt(ksq) + epsilon
+
+        return one/k
+    
+    return _h 
+
 
 
 # we define the constant function - if necessary

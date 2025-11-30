@@ -39,13 +39,22 @@ class System:
         # the operator that takes our desired solution to zero
         operator : Operator,
 
-        # an operator on images that gives us the forcing term
-        forcing_term : Distribution,
+        # a distribution on images that gives us the forcing term
+        # if none, then the forcing term is assumed to be zero.
+        forcing_term : Distribution | None = None,
 
-        # the function we apply pointwise to the results of applying the desired operator.
-        # by default, we square the value at each point and reduce to the mean
-        pointwise_loss : Callable[[tf.Tensor], tf.Tensor] = tf.square,
-        # a function that calculate the boundary penalty for some output image
+        # the function we apply pointwise to the results of applying the desired operator, before integrating 
+        # over the domain.
+        #
+        # by default, we square the value at each point
+        # this is mainly to assert consistency in sign, so decreasing the integrated operator loss is
+        # equivalent to decreasing the total absolute pointwise deviation from the correct solution.
+        #
+        # if the pointwise loss is None, we assume it is just the identity.
+        pointwise_loss : Callable[[tf.Tensor], tf.Tensor] | None = tf.square,
+
+        # a function that calculates the boundary penalty for some output image
+        # if this is None, we apply no boundary penalty.
         boundary_penalty : Callable[[Image], tf.Tensor] | None = None, 
     ):
         self.spatial_dims = spatial_dims
@@ -57,21 +66,38 @@ class System:
         self.boundary_penalty = boundary_penalty
 
     
+    # sets a new forcing term
+    def force(self, forcing_term : Distribution):
+        self.forcing_term = forcing_term
+    
+
     # we calculate the operator loss for some 
     # proposed solution image U
     #
-    # we want Operator[U] = F
+    # we want Operator[U] = F, with F the forcing term
     # 
     # so we will define the loss image to be (Operator[U] - F)
     # and take the integral over the domain.
-    def operator_loss(self, solution_image : Image, forcing_image : Image) -> tf.Tensor:
+    #
+    # if F is None, then we assume the equation Operator[U] = 0
+    # and act accordingly.
+    def operator_loss(self, solution_image : Image, forcing_image : Image | None = None) -> tf.Tensor:
         # we apply the operator:
         operator_image = self.operator(solution_image)
 
-        # loss_image is the image holding the difference between Operator[U] and F
-        loss_image = operator_image._mutate(new_mesh=self.pointwise_loss(operator_image.mesh-forcing_image.mesh))
+        # loss_image is the image holding the pointwise loss of the difference between Operator[U] and F
+        # if F is None, then the loss image is just pointwise loss of Operator[U]
 
-        return Integral(loss_image) # we square each point-deviation from zero and return
+        # first we find the difference
+        loss_mesh = operator_image.mesh if forcing_image is None else (operator_image.mesh - forcing_image.mesh)
+        
+        # then we apply the pointwise loss
+        if self.pointwise_loss is not None:
+            loss_mesh = self.pointwise_loss(loss_mesh)
+
+        loss_image = operator_image._mutate(new_mesh = loss_mesh)
+
+        return Integral(loss_image, average=True) # we integrate the loss over the domain and return.
     
 
 

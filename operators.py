@@ -5,7 +5,7 @@
 
 
 from context import *
-from typing import Callable, Tuple, List
+from typing import Callable, Tuple, List, Sequence
 from geometry import Function, Geometry
 
 
@@ -228,7 +228,7 @@ class Image:
         
         # if the function is a scalar:
         # then we adjust func_shape to be []
-        if len(func_shape) == 1 and func_shape[0] == 1:
+        if len(func_shape) == 0 or (len(func_shape) == 1 and func_shape[0] == 1):
             total_shape = self.padded_mesh_shape
             func_shape = []
         else:
@@ -274,26 +274,39 @@ KernelBase = Tuple[tf.Tensor, List[int]]
 right_partial_base : KernelBase = (tf.constant([-1, 1], dtype=DTYPE), [2])
 center_partial_base : KernelBase = (tf.constant([-0.5, 0, 0.5], dtype=DTYPE), [3])
 
-# I will be using the right handed base here.
-PARTIAL_BASE = right_partial_base
+# we define the 2d flat second partial kernel:
+second_partial_base : KernelBase = (tf.constant([1, -2, 1], dtype=DTYPE), [3])
 
 
-def CreateKernel(base : KernelBase, dims, func_size, i) -> tf.Tensor:
+# gives us the shape of the kernel acting on the given axis, based on the base shape and the mesh dimensions
+def kernel_shape(base_shape : Sequence[int], dims : int, axis=0) -> tf.Tensor:
+    sizes = [1] * dims
+    
+    for j in base_shape:
+        sizes[axis] = j
+        axis += 1
+    
+    return sizes
+
+
+def CreateKernel(base : KernelBase, dims : int, func_size : int, axis=0)-> tf.Tensor:
     # this gives a differential kernel along the given axis
     # without dividing by the relevant dx.
     # so this takes in F and returns dF
+    stencil, base_shape = base 
 
-    stencil, shape = base
-    sizes = [1] * dims
-    
-    for j in shape:
-        sizes[i] = j
-        i += 1 
-    
-    stencil = tf.reshape(stencil, sizes + [1, 1])
+    sizes = kernel_shape(base_shape=base_shape, dims=dims, axis=axis)
 
+    stencil = tf.reshape(stencil, shape=sizes + [1, 1])
     # reshape to [k1, k2, ..., kN, func_size, func_size]
-    return tf.broadcast_to(stencil, sizes + [func_size, func_size])
+    return tf.broadcast_to(stencil, shape=sizes + [func_size, func_size])
+    
+    
+def ReshapeKernel(kernel : tf.Tensor, base : KernelBase, dims : int, func_size : int, axis=0)-> tf.Tensor:
+    # we reshape the given kernel to act along the given  axis.
+    sizes = kernel_shape(base_shape=base[1], dims=dims, axis=axis)
+    return tf.reshape(kernel, shape=sizes + [func_size, func_size])
+    
 
 
 # --- some help --- #
@@ -336,35 +349,43 @@ def prep_for_kernel(image : Image):
 Operator = Callable[[Image], Image]
 
 
-# this returns an operator that calculates the partial derivatives along the
-# specified coordinates and stacks on the last axis. if empty, will calculate the full gradient.
-def Partials(
-    wrt = [] # the list of coordinate indices over which to compute partials
+# since many kernel bases are reused over multiple axes,
+# we wrap the iteration in a nice function
+def ConvolveIter(
+    base : KernelBase,
+    axes : Sequence[int] = [], # the list of axes over to convolve
+
+    # if we want to apply a final function onto the new mesh before we 
+    # return the image.
+    # it is assumed to be a function of the final mesh tensor and the initial image.
+    output_gate : Callable[[tf.Tensor, Image], tf.Tensor] | None = None 
 ) -> Operator:
 
-    # returns tensor of relevant partial derivatives of f over the given domain, 
-    # same coordinate order as in wrt, stacked along last axis.
     def _h(phi : Image) -> Image:
         domain = phi.domain
+        dims = domain.dimension 
 
         substrate, func_size = prep_for_kernel(phi)
         outputs = []
 
+        kernel = CreateKernel(base=base, dims=dims, func_size=func_size)
+
         # if axes are not specified, we calculate over all variables by default.
-        for i in (wrt if wrt else range(domain.dimension)):
-            kernel = CreateKernel(PARTIAL_BASE, domain.dimension, func_size, i)
+        for i in (axes if axes else range(domain.dimension)):
+            kernel = ReshapeKernel(kernel=kernel, base=base, dims=dims, func_size=func_size, axis=i)
             
             # we pad convolutions to the same size as before, and account for this by including
             # sufficient padding beforehand.
             post_kernel = tf.nn.convolution(substrate, kernel, padding='SAME')
-            
-            output = tf.squeeze(post_kernel, axis=0)
-            output = tf.reshape(output, shape=phi.shape)
-
-            outputs.append(output/domain.steps[i]) # divide by relevant dx
+            output = tf.reshape(post_kernel, shape=phi.shape)
+            outputs.append(output)
         
         # stack along the final axis
         final_mesh = tf.stack(outputs, axis=-1)
+
+        if output_gate is not None:
+            final_mesh = output_gate(final_mesh, phi)
+
         final_shape = tf.shape(final_mesh)
 
         # ok. now we correct the padding of the geometry functions:
@@ -376,11 +397,102 @@ def Partials(
     return _h 
 
 
+# this returns an operator that calculates the partial derivatives along the
+# specified coordinates and stacks on the last axis. if empty, will calculate the full gradient.
+#
+# this is an iterative convolution over the specified axes in wrt[].
+# the output gate is simply dividing by dx.
+def Partials(
+    wrt = [], # the list of coordinate indices over which to compute partials
+    centered=False
+) -> Operator:
+    # returns tensor of relevant partial derivatives of f over the given domain, 
+    # same coordinate order as in wrt, stacked along last axis.
+
+    new_dim = len(wrt)
+
+    # we define the output gate - divide by dx
+    def output_gate(output_mesh : tf.Tensor, phi : Image) -> tf.Tensor:
+        # this is [N]
+        dX = phi.domain.steps 
+
+        # or [M], call it.
+        if wrt:
+            dX = tf.gather(dX, indices=wrt, axis=0)
+        
+        dims = phi.domain.dimension
+        M = new_dim or dims
+        
+        # and the output mesh looks like [*mesh_shape, *func_shape, M]
+        # so we reshape dX like so:
+        dX = tf.reshape(dX, shape = [1] * (dims + len(phi.func_shape)) + [M])
+
+        return output_mesh/dX
+    
+    return ConvolveIter(
+        base = center_partial_base if centered else right_partial_base,
+        axes=wrt,
+        output_gate=output_gate
+    )
+
+
 # the full gradient.
 # takes in an image of rank n,
 # returns one of rank n+1
 Gradient : Operator = Partials()
 
+
+# computes non-mixed second partials
+def DiagonalSecondPartials(
+    wrt = [], # the list of coordinate indices over which to compute second partials
+) -> Operator:
+    
+    # returns tensor of relevant second partial derivatives of f over the given domain, 
+    # same coordinate order as in wrt, stacked along last axis.
+
+    new_dim = len(wrt)
+
+    # we define the output gate - divide by dx^2
+    def output_gate(output_mesh : tf.Tensor, phi : Image) -> tf.Tensor:
+        # this is [N]
+        dX = phi.domain.steps 
+
+        # or [M], call it.
+        if wrt:
+            dX = tf.gather(dX, indices=wrt, axis=0)
+        
+        dims = phi.domain.dimension
+        M = new_dim or dims
+        
+        dX_sq = tf.square(dX)
+
+        # and the output mesh looks like [*mesh_shape, *func_shape, M]
+        # so we reshape dX like so:
+        dX_sq = tf.reshape(dX_sq, shape = [1] * (dims + len(phi.func_shape)) + [M])
+
+        return output_mesh/dX_sq
+    
+    return ConvolveIter(
+        base = second_partial_base,
+        axes=wrt,
+        output_gate=output_gate
+    )
+
+# the full main diagonal of the hessian matrix.
+HessianDiagonal : Operator = DiagonalSecondPartials()
+
+
+# the Laplacian operator in flat-space - sums the diagonal second partials
+def FlatLaplacian(phi : Image) -> Image:
+    second_partials = HessianDiagonal(phi)
+
+    partials_mesh = second_partials.mesh 
+    # sum through the coordinate second partials to get the flat laplacian
+    laplacian_mesh = tf.reduce_sum(partials_mesh, axis=-1)
+    
+    return second_partials._mutate(new_mesh=laplacian_mesh, new_func_shape=phi.func_shape)
+    
+'''
 
 # this is the vector divergence, div(A) = 1/sqrt(g) d_mu sqrt(g) A^mu
 def VectorDivergence(
@@ -487,3 +599,5 @@ def HelmholtzOperator(k : tf.Tensor): # k should be a scalar
         return laplace_phi._mutate(new_mesh=laplace_phi.mesh + k_phi_mesh)
         
     return _h
+
+'''

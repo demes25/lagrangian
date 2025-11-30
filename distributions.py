@@ -8,7 +8,7 @@ from context import *
 from typing import ParamSpec, Callable
 from geometry import Function
 from operators import Image, padding_adjuster
-from functions import gaussian_fn, norm_sq_fn
+from functions import gaussian_fn, norm_sq_fn, reciprocal_fn
 
 
 # calculates the 'total integral' of the given image
@@ -21,7 +21,7 @@ from functions import gaussian_fn, norm_sq_fn
 #
 # TODO: domain.steps may not be constant in the domain per discretized point
 # also, their product may be different. work on generalizing to non-cartesian coordinates.
-def Integral(image : Image) -> tf.Tensor: 
+def Integral(image : Image, average=False) -> tf.Tensor: 
     flattened = image.view(flattened=True) 
 
     g = image.geometry[0][padding_adjuster(image.pad, image.domain.dimension, 2)]  # we get the unpadded metric
@@ -35,7 +35,8 @@ def Integral(image : Image) -> tf.Tensor:
 
     integrable = flattened * dVol
 
-    return tf.reduce_sum(integrable, axis=0) 
+    # if average, we return the mean over the mesh
+    return tf.reduce_mean(integrable, axis=0)  if average else tf.reduce_sum(integrable, axis=0)
 
 
 
@@ -48,6 +49,25 @@ def Integral(image : Image) -> tf.Tensor:
 # while operators convolve differential kernels.
 Distribution = Callable[[Image], Image]
 
+
+# distribution which simply acts some Function (i.e. [...] -> tf.Tensor) on the mesh of a given image.
+def FunctionDistribution(fxn : Function, normalize : bool = True, scale : tf.Tensor = one, mutable=False) -> Distribution:
+    def _h(x : Image) -> Image:
+        f_img = x.apply(fxn, mutable=mutable)
+        sc = scale 
+
+        # if we normalize the image,
+        # we divide it by its integral over the domain
+        if normalize:
+            integral = Integral(f_img)
+            sc = sc / integral
+        
+        # note this function is scaled at will by some other scalar if we want it to be.
+        # by default this will just be one.
+        return f_img._mutate(f_img.mesh * sc)
+    
+    return _h 
+    
 
 # we apply the gaussian
 # 
@@ -64,15 +84,15 @@ Distribution = Callable[[Image], Image]
 # variance should be [] 
 def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : tf.Tensor = one, mutable=False) -> Distribution:
     # variance should be a scalar, 
-    # mean should have the same dimensions as the coordinates.
+    # mean should have dimension [N] same as each coordinate entry.
     
-    mean = tf.expand_dims(mean, axis=0)
-    scale = scale 
-
     if variance == zero:
         def _h(x : Image) -> Image:
             # if the variance is zero,
             # then we apply a 'dirac delta'
+
+            # we first expand the means 
+            mu = tf.expand_dims(mean, axis=0)
 
             # we identify the point on the mesh that is closest to this point,
             # and we make it so that its integral is one.
@@ -82,7 +102,7 @@ def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : t
             # we take x to be 'contravariant' coordinate 'vectors'
             x_flat = x.view(padded=True, flattened=True)
             
-            dists = norm_sq_fn(flat_g)(x_flat - mean) # [B]
+            dists = norm_sq_fn(flat_g)(x_flat - mu) # [B]
             index = tf.argmin(dists)
             
             value = tf.linalg.det(flat_g[index]) * tf.reduce_prod(x.domain.steps, axis=0) # to make this integrate to one, we divide by sqrt_g dXdY...
@@ -96,24 +116,20 @@ def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : t
     
     else:
         gaussian = gaussian_fn(mean, variance)
-
-        def _h(x : Image) -> Image:
-            gaussian_img = x.apply(gaussian, mutable=mutable)
-
-            # if we normalize the gaussian,
-            # we divide it by its integral
-            if normalize:
-                integral = Integral(gaussian_img)
-                scale = scale / integral
-            
-            # note this gaussian is scaled at will by some other scalar if we want it to be.
-            # by default this will just be one.
-            return gaussian_img._mutate(gaussian_img.mesh * scale)
-        
-        return _h
-        
+        return FunctionDistribution(gaussian, normalize=normalize, scale=scale, mutable=mutable)
         
 
+# we apply a radial reciprocal from the given point
+# i.e. 1/sqrt(dx^2 + dy^2 + ...)
+#
+# if the argument is zero here, we put a very large number.
+#
+# x should be [B, N]
+# center should be [N]
+# epsilon should be [] -- the small term we use to offset division by zero.
+def Reciprocal(center : tf.Tensor, epsilon : tf.Tensor = 1e-4, normalize=True, scale : tf.Tensor = one, mutable = False) -> Distribution:
+    recip = reciprocal_fn(center=center, epsilon=epsilon)
+    return FunctionDistribution(recip, normalize=normalize, scale=scale, mutable=mutable)
 
 
 
