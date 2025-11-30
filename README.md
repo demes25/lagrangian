@@ -11,8 +11,7 @@ For the neural network architecture, I initially tried a simple n-layer MLP on h
 I then remembered that many linear inhomogeneous PDEs rely on Green's functions or 'solution kernels' which we may convolve with the forcing term to yield a particular solution. The NN analogues of such convolutional solution kernels are, naturally, convolutional NNs. After some digging, I found some good CNN architectures that work well in solving PDEs and acting as Physics-informed NNs.
 
 All that to say:
-This program currently uses the U-Net convolutional neural network architecture, which is detailed at length at 
-# https://www.sciencedirect.com/topics/computer-science/u-net
+This program currently uses the U-Net convolutional neural network architecture, which is detailed at length at https://www.sciencedirect.com/topics/computer-science/u-net 
 
 Tests, logs, images, and relevant notes are stored in the 'logs' directory.
 
