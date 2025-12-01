@@ -1,7 +1,7 @@
 # pdes
-A convolutional neural network (CNN) to solve inhomogeneous partial differential equations on discretized domains.
+Convolutional neural networks (CNN) and trainable meshes for solving eigenvalue and inverse problems for partial differential equations on discretized domains.
 
-This project uses TensorFlow and TensorFlow-Plot. 
+This project uses TensorFlow [https://www.tensorflow.org/] and TensorFlow-Plot [https://pypi.org/project/tensorflow-plot/]. 
 
 ## overview 
 
@@ -14,7 +14,9 @@ For the neural network architecture, I initially tried a simple n-layer MLP on h
 I then remembered that many linear inhomogeneous PDEs rely on Green's functions or 'solution kernels' which we may convolve with the forcing term to yield a particular solution. The NN analogues of such convolutional solution kernels are, naturally, convolutional NNs. After some digging, I found some good CNN architectures that work well in solving PDEs and acting as Physics-informed NNs.
 
 All that to say:
-This program currently uses the U-Net convolutional neural network architecture, which is detailed at length at https://www.sciencedirect.com/topics/computer-science/u-net 
+This program currently uses the U-Net convolutional neural network architecture for inverse problems, which is detailed at length at https://www.sciencedirect.com/topics/computer-science/u-net 
+
+For the eigenvalue problems (in-dev), I will be using trainable meshes (tensor-valued tf.Variables) along with boundary values and constraints. 
 
 Tests, logs, images, and relevant notes are stored in the 'logs' directory.
 
