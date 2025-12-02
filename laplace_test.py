@@ -6,31 +6,35 @@
 from operators import *
 from keras.models import save_model, load_model
 from keras.optimizers import AdamW
-from networks import SpatialKernel, OperatorWrapper
+from networks import SpatialKernel, NetworkOperator
 from geometry import Euclidean
-from distributions import Gaussian, Reciprocal
+from lattices import Domain
+from distributions import Distribution, Gaussian, Reciprocal
 from system import System
 from plots import save_heatmap
 
 MODELPATH = None
-NAME = 'test4'
+NAME = 'test5'
 
 # we test our current abilities.
 # i'll try to find the derivative and second derivative of the square function
 # using our mesh+convolution framework.
 step = 0.05
-start = -4.8 # the size of the mesh should be divisible by 2 at least thrice
+padding = 32
+# now we find the relevant ranges by looking at our desired side length 256
+# (256 - 2 * 32) * 0.05 = 9.6
+# so do:
+start = -4.8
 end = 4.8
 
 # we want each point to look like [B, 1]
 dX = tf.constant([step, step])
 ranges = tf.constant([[start, start], [end, end]])
-domain = Domain(Euclidean(2), ranges, dX) # this is now [b, b, 1])
+domain = Domain(Euclidean(2), ranges, dX, padding=padding) # this is now [b, b, 1])
 
-base_image = Image(domain, pad=32)
 
 # we now try training over many different forcing terms
-forcing_terms = [
+forcing_terms : List[Distribution] = [
     Reciprocal([-0.5, 0.0], scale=one),
     Gaussian([-1.2, 0.4], 0.0125, scale=one),
 
@@ -46,9 +50,9 @@ forcing_terms = [
 
 
 if MODELPATH is None:
-    system = System(2, operator=FlatLaplacian, pointwise_loss=tf.square)
+    system = System(2, operator=FlatSpatialLaplacian, pointwise_loss=tf.square)
 
-    model = SpatialKernel(shape=[], dims=2, size=11, activation='relu')
+    model = SpatialKernel(shape=[], dims=2, size=7, depth=7, activation='relu')
 
     for f in forcing_terms:
         system.force(f)
@@ -56,22 +60,22 @@ if MODELPATH is None:
 else:
     model = load_model(MODELPATH)
 
-solution_operator = OperatorWrapper(model)
+solution_operator = NetworkOperator(model)
 
 i = 0
 for forcing_term in forcing_terms:
     # we save the forcing image
-    forcing_image = forcing_term(base_image)
-    save_heatmap(forcing_image.view(), f'logs/laplace/{NAME}/imgs/{i}-forcing_term.png')
+    forcing_image = forcing_term(domain)
+    save_heatmap(forcing_image.get(), f'logs/laplace/{NAME}/imgs/{i}-forcing_term.png')
 
     # the learned solution
     solution_image = solution_operator(forcing_image)
-    save_heatmap(solution_image.view(), f'logs/laplace/{NAME}/imgs/{i}-solution.png')
+    save_heatmap(solution_image.get(), f'logs/laplace/{NAME}/imgs/{i}-solution.png')
 
     # and the "reported" forcing term - i.e. what we get
     # when we apply the desired operator on the learned solution
-    laplacian_image = FlatLaplacian(solution_image)
-    save_heatmap(laplacian_image.view(), f'logs/laplace/{NAME}/imgs/{i}-reported_forcing_term.png')
+    laplacian_image = FlatSpatialLaplacian(solution_image)
+    save_heatmap(laplacian_image.get(), f'logs/laplace/{NAME}/imgs/{i}-reported_forcing_term.png')
 
     i+=1
 

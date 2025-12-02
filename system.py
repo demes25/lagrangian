@@ -9,10 +9,10 @@ from context import *
 from keras.optimizers import Optimizer
 from keras.utils import Progbar
 from keras.models import Model
-from networks import OperatorWrapper
-
-from operators import Operator, Domain, Image
-from distributions import Distribution, Integral
+from networks import NetworkOperator
+from lattices import Domain, Image, Integral
+from operators import Operator
+from distributions import Distribution
 from typing import Callable
 
 # here we look at general systems and how to deal with them:
@@ -83,19 +83,19 @@ class System:
     # and act accordingly.
     def operator_loss(self, solution_image : Image, forcing_image : Image | None = None) -> tf.Tensor:
         # we apply the operator:
-        operator_image = self.operator(solution_image)
+        loss_image = self.operator(solution_image)
 
         # loss_image is the image holding the pointwise loss of the difference between Operator[U] and F
         # if F is None, then the loss image is just pointwise loss of Operator[U]
 
         # first we find the difference
-        loss_mesh = operator_image.mesh if forcing_image is None else (operator_image.mesh - forcing_image.mesh)
+        loss_grid = loss_image.grid if forcing_image is None else (loss_image.grid - forcing_image.grid)
         
         # then we apply the pointwise loss
         if self.pointwise_loss is not None:
-            loss_mesh = self.pointwise_loss(loss_mesh)
+            loss_grid = self.pointwise_loss(loss_grid)
 
-        loss_image = operator_image._mutate(new_mesh = loss_mesh)
+        loss_image.grid = loss_grid
 
         return Integral(loss_image, average=True) # we integrate the loss over the domain and return.
     
@@ -114,10 +114,9 @@ class System:
         # we put a nice little progress bar for prettiness
         bar = Progbar(epochs, stateful_metrics=['operator loss', 'boundary penalty'])
        
-        base_image = Image(domain, pad=32)
-        forcing_image = self.forcing_term(base_image)
+        forcing_image = self.forcing_term(domain)
        
-        modelOperator = OperatorWrapper(U)
+        modelOperator = NetworkOperator(U)
 
         if self.boundary_penalty is None:
             # boundary_weight is ignored

@@ -1,9 +1,11 @@
 import tensorflow as tf
+from typing import Sequence
 
-PACKAGE : str = 'Lagrangian'
+PACKAGE : str = 'PDEs'
 
 # define global things here
 DTYPE : tf.DType = tf.float32
+Shape = Sequence[int] | tf.TensorShape | tf.Tensor
 
 # some useful c-numbers
 zero : tf.Tensor = tf.constant(0, dtype=DTYPE)

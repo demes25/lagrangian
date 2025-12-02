@@ -5,39 +5,9 @@
 
 import tensorflow as tf
 from context import *
-from typing import ParamSpec, Callable
-from geometry import Function
-from operators import Image, padding_adjuster
-from functions import gaussian_fn, norm_sq_fn, reciprocal_fn
-
-
-# calculates the 'total integral' of the given image
-# 
-# i.e. the left riemann sum
-#
-# int(unpadded_domain)[ img(x) sqrt_g(x) dx ]
-#
-# we return a tensor of shape image.func_shape
-#
-# TODO: domain.steps may not be constant in the domain per discretized point
-# also, their product may be different. work on generalizing to non-cartesian coordinates.
-def Integral(image : Image, average=False) -> tf.Tensor: 
-    flattened = image.view(flattened=True) 
-
-    g = image.geometry[0][padding_adjuster(image.pad, image.domain.dimension, 2)]  # we get the unpadded metric
-    flat_sqrt_g = tf.reshape(tf.sqrt(tf.abs(tf.linalg.det(g))), shape=[-1]) # we find the sqrt of det g
-
-    dVol = flat_sqrt_g * tf.reduce_prod(image.domain.steps) # we multiply by dXdYdZ...
-
-    new_shape = tf.concat([tf.shape(dVol), [1 for _ in image.func_shape]], axis=0)
-    
-    dVol = tf.reshape(dVol, new_shape)
-
-    integrable = flattened * dVol
-
-    # if average, we return the mean over the mesh
-    return tf.reduce_mean(integrable, axis=0)  if average else tf.reduce_sum(integrable, axis=0)
-
+from typing import Callable
+from lattices import Domain, Image, Integral
+from functions import Function, gaussian_fn, norm_sq_fn, reciprocal_fn
 
 
 # --- DISTRIBUTIONS ---- #
@@ -47,24 +17,41 @@ def Integral(image : Image, average=False) -> tf.Tensor:
 # 
 # distributions act a function (or distribution generator) on the mesh
 # while operators convolve differential kernels.
-Distribution = Callable[[Image], Image]
+Distribution = Callable[[Domain], Image]
 
 
 # distribution which simply acts some Function (i.e. [...] -> tf.Tensor) on the mesh of a given image.
-def FunctionDistribution(fxn : Function, normalize : bool = True, scale : tf.Tensor = one, mutable=False) -> Distribution:
-    def _h(x : Image) -> Image:
-        f_img = x.apply(fxn, mutable=mutable)
+def FunctionDistribution(fxn : Function, normalize : bool = True, scale : tf.Tensor = one) -> Distribution:
+    def _h(x : Domain) -> Image:
+        X = x.view(padded=True, flattened=True)
+        f = fxn(X)
+
+        func_shape = tf.shape(f)[1:].numpy().tolist()
+        
+        # if the function is a scalar:
+        # then we adjust func_shape to be []
+        if len(func_shape) == 0 or (len(func_shape) == 1 and func_shape[0] == 1):
+            total_shape = x.leading_shape
+        else:
+            total_shape = tf.concat([x.leading_shape, func_shape], axis=0)
+
+        func_grid = tf.reshape(f, shape=total_shape)
+
+        func_image = Image(domain=x, grid=func_grid, shape=total_shape, entry_shape=func_shape)
+
         sc = scale 
 
         # if we normalize the image,
         # we divide it by its integral over the domain
         if normalize:
-            integral = Integral(f_img)
+            integral = Integral(func_image)
             sc = sc / integral
         
         # note this function is scaled at will by some other scalar if we want it to be.
         # by default this will just be one.
-        return f_img._mutate(f_img.mesh * sc)
+        func_image.grid = func_image.grid * sc
+        
+        return func_image 
     
     return _h 
     
@@ -82,10 +69,11 @@ def FunctionDistribution(fxn : Function, normalize : bool = True, scale : tf.Ten
 # x should be [B, N]
 # mean should be [N]
 # variance should be [] 
-def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : tf.Tensor = one, mutable=False) -> Distribution:
+def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : tf.Tensor = one) -> Distribution:
     # variance should be a scalar, 
     # mean should have dimension [N] same as each coordinate entry.
     
+    # TODO: tend to the variance==0 case.
     if variance == zero:
         def _h(x : Image) -> Image:
             # if the variance is zero,
@@ -115,8 +103,7 @@ def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : t
         return _h
     
     else:
-        gaussian = gaussian_fn(mean, variance)
-        return FunctionDistribution(gaussian, normalize=normalize, scale=scale, mutable=mutable)
+        return FunctionDistribution(gaussian_fn(mean, variance), normalize=normalize, scale=scale)
         
 
 # we apply a radial reciprocal from the given point
@@ -127,9 +114,8 @@ def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : t
 # x should be [B, N]
 # center should be [N]
 # epsilon should be [] -- the small term we use to offset division by zero.
-def Reciprocal(center : tf.Tensor, epsilon : tf.Tensor = 1e-4, normalize=True, scale : tf.Tensor = one, mutable = False) -> Distribution:
-    recip = reciprocal_fn(center=center, epsilon=epsilon)
-    return FunctionDistribution(recip, normalize=normalize, scale=scale, mutable=mutable)
+def Reciprocal(center : tf.Tensor, epsilon : tf.Tensor = 1e-4, normalize=True, scale : tf.Tensor = one) -> Distribution:
+    return FunctionDistribution(reciprocal_fn(center=center, epsilon=epsilon), normalize=normalize, scale=scale)
 
 
 
