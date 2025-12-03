@@ -21,7 +21,7 @@ Distribution = Callable[[Domain], Image]
 
 
 # distribution which simply acts some Function (i.e. [...] -> tf.Tensor) on the mesh of a given image.
-def FunctionDistribution(fxn : Function, normalize : bool = True, scale : tf.Tensor = one) -> Distribution:
+def Distribute(fxn : Function, normalize : bool = True, scale : tf.Tensor = one) -> Distribution:
     def _h(x : Domain) -> Image:
         X = x.view(padded=True, flattened=True)
         f = fxn(X)
@@ -54,12 +54,63 @@ def FunctionDistribution(fxn : Function, normalize : bool = True, scale : tf.Ten
         return func_image 
     
     return _h 
+
+
+# distribution that takes multiple functions and applies the one by one to an input domain,
+# and then concats them in the first axis.
+# we get:
+# [B, ..., 1] -> [B * len(funcs), ..., dim(func)]
+# it is assumed that the functions here return all the same shape.
+def BatchDistribute(funcs : Sequence[Function], normalize : bool = True, scale : tf.Tensor = one) -> Distribution:
+    def _h(x : Domain) -> Image:
+        X = x.view(padded=True, flattened=True)
+        
+        func_grids = []
+
+        func_shape = None 
+        total_shape = None
+
+        for func in funcs:
+            f = func(X)
+
+            if total_shape is None:
+                func_shape = tf.shape(f)[1:].numpy().tolist()
+            
+                # if the function is a scalar:
+                # then we adjust func_shape to be []
+                if len(func_shape) == 0 or (len(func_shape) == 1 and func_shape[0] == 1):
+                    total_shape = x.leading_shape
+                else:
+                    total_shape = tf.concat([x.leading_shape, func_shape], axis=0)
+
+            func_grid = tf.reshape(f, shape=total_shape)
+
+            func_grids.append(func_grid)
+
+        func_grids = tf.concat(func_grids, axis=0) # concat along the batch axis
+
+        func_image = Image(domain=x, grid=func_grids, shape=total_shape, entry_shape=func_shape, batches=len(funcs))
+
+        sc = scale 
+
+        # if we normalize the image,
+        # we divide it by its integral over the domain
+        if normalize:
+            integral = Integral(func_image)
+            sc = sc / integral
+        
+        # note this function is scaled at will by some other scalar if we want it to be.
+        # by default this will just be one.
+        func_image.grid = func_image.grid * sc
+        
+        return func_image 
     
+    return _h
+
 
 # we apply the gaussian
 # 
 # 1/sqrt(2pi var) exp((x-mu)^2/2var)
-
 # mu is the mean, x is the coordinates at the given point in the mesh,
 # and var is the variance.
 # 
@@ -75,7 +126,7 @@ def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : t
     
     # TODO: tend to the variance==0 case.
     if variance == zero:
-        def _h(x : Image) -> Image:
+        def _h(x : Domain) -> Image:
             # if the variance is zero,
             # then we apply a 'dirac delta'
 
@@ -85,7 +136,7 @@ def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : t
             # we identify the point on the mesh that is closest to this point,
             # and we make it so that its integral is one.
             g = x.geometry[0]
-            flat_g = tf.reshape(g, shape=[-1, x.domain.dimension, x.domain.dimension])
+            flat_g = tf.reshape(g, shape=[-1, x.dimension, x.dimension])
 
             # we take x to be 'contravariant' coordinate 'vectors'
             x_flat = x.view(padded=True, flattened=True)
@@ -93,17 +144,17 @@ def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : t
             dists = norm_sq_fn(flat_g)(x_flat - mu) # [B]
             index = tf.argmin(dists)
             
-            value = tf.linalg.det(flat_g[index]) * tf.reduce_prod(x.domain.steps, axis=0) # to make this integrate to one, we divide by sqrt_g dXdY...
+            value = tf.linalg.det(flat_g[index]) * tf.reduce_prod(x.steps, axis=0) # to make this integrate to one, we divide by sqrt_g dXdY...
             new_flat = tf.one_hot(indices=index, depth=tf.size(dists), on_value=scale/value)
             
-            new_mesh = tf.reshape(new_flat, shape=x.padded_mesh_shape)
+            new_mesh = tf.reshape(new_flat, shape=x.leading_shape)
 
-            return Image(domain=x.domain, mesh=new_mesh, shape=x.padded_mesh_shape, geometry=x.geometry, pad=x.pad)
+            return Image(domain=x, mesh=new_mesh, shape=x.leading_shape, geometry=x.geometry, pad=x.pad)
 
         return _h
     
     else:
-        return FunctionDistribution(gaussian_fn(mean, variance), normalize=normalize, scale=scale)
+        return Distribute(gaussian_fn(mean, variance), normalize=normalize, scale=scale)
         
 
 # we apply a radial reciprocal from the given point
@@ -115,11 +166,11 @@ def Gaussian(mean : tf.Tensor, variance : tf.Tensor, normalize = True, scale : t
 # center should be [N]
 # epsilon should be [] -- the small term we use to offset division by zero.
 def Reciprocal(center : tf.Tensor, epsilon : tf.Tensor = 1e-4, normalize=True, scale : tf.Tensor = one) -> Distribution:
-    return FunctionDistribution(reciprocal_fn(center=center, epsilon=epsilon), normalize=normalize, scale=scale)
+    return Distribute(reciprocal_fn(center=center, epsilon=epsilon), normalize=normalize, scale=scale)
 
 
 
 def Sine(wavenum : tf.Tensor, normalize=True, scale : tf.Tensor = one) -> Distribution:
-    return FunctionDistribution(sine_fn(wavenum), normalize=normalize, scale=scale)
+    return Distribute(sine_fn(wavenum), normalize=normalize, scale=scale)
 
 

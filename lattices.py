@@ -247,7 +247,9 @@ class Image(Lattice):
         grid : tf.Tensor, # the grid that we wrap here, a tensor of the shape [B, n1, n2, ..., nN, *V] where V is the shape of the lattice value at (x1, x2, ..., xN)
         
         shape : tf.Tensor | None = None,
-        entry_shape : Sequence[int] | None = None
+        entry_shape : Sequence[int] | None = None,
+
+        batches : int = 1 # how many batches we have (per batch in the domain). In Images, this tells us how many batches PER DOMAIN BATCH. so the total amount of batches B is self.batches * self.domain.batches
     ):
         
         self.domain = domain
@@ -269,7 +271,7 @@ class Image(Lattice):
             leading_shape=domain.leading_shape, 
             shape=shape, 
             padding=domain.padding,
-            batches=domain.batches
+            batches=batches
         )
 
         '''

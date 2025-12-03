@@ -19,10 +19,10 @@ NAME = 'test5'
 # we test our current abilities.
 # i'll try to find the derivative and second derivative of the square function
 # using our mesh+convolution framework.
-step = 0.01
+step = 0.05
 padding = 32
-# now we find the relevant ranges by looking at our desired side length 128
-# (128 - 2 * 16) * 0.05 = 4.8
+# now we find the relevant ranges by looking at our desired side length 256
+# (256 - 2 * 16) * 0.05 = 4.8
 # so do:
 start = -6.4
 end = 6.4

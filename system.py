@@ -39,7 +39,7 @@ class System:
         # the operator that takes our desired solution to zero
         operator : Operator,
 
-        # a distribution on images that gives us the forcing term
+        # a distribution on domains that gives us the image of the forcing term
         # if none, then the forcing term is assumed to be zero.
         forcing_term : Distribution | None = None,
 
@@ -97,7 +97,7 @@ class System:
 
         loss_image.grid = loss_grid
 
-        return Integral(loss_image, average=True) # we integrate the loss over the domain and return.
+        return Integral(loss_image, average=False) # we integrate the loss over the domain and return.
     
 
 
